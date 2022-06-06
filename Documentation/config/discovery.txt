@@ -1,0 +1,26 @@
+discovery.bare::
+	Specifies what kinds of directories Git can recognize as a bare
+	repository when looking for the repository (aka repository
+	discovery). This has no effect if repository discovery is not
+	performed e.g. the path to the repository is set via `--git-dir`
+	(see linkgit:git[1]).
++
+This config setting is only respected when specified in a system or global
+config, not when it is specified in a repository config or via the command
+line option `-c discovery.bare=<value>`.
++
+The currently supported values are `always` (Git always recognizes bare
+repositories), `cwd` (Git only recognizes bare repositories if they are the
+current working directory) and `never` (Git never recognizes bare
+repositories). This defaults to `always`, but this default is likely to
+change.
++
+If your workflow does not rely on bare repositories, it is recommended that
+you set this value to `never`. This makes repository discovery easier to
+reason about and prevents certain types of security and non-security
+problems, such as:
+
+* `git clone`-ing a repository containing a malicious bare repository
+  inside it.
+* Git recognizing a directory that isn't meant to be a bare repository,
+  but happens to look like one.
