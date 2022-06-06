@@ -1743,6 +1743,40 @@ test_expect_success 'ORIG_HEAD is updated correctly' '
 	test_cmp_rev ORIG_HEAD test-orig-head@{1}
 '
 
+test_expect_success '--update-refs adds git branch commands' '
+	git checkout -b update-refs no-conflict-branch &&
+	test_commit extra fileX &&
+	git commit --amend --fixup=L &&
+	(
+		set_cat_todo_editor &&
+		git branch -f base A &&
+		git branch -f first J &&
+		git branch -f second J &&
+		git branch -f third L &&
+
+		test_must_fail git rebase -i --autosquash --update-refs primary >todo &&
+
+		cat >expect <<-EOF &&
+		pick $(git log -1 --format=%h J) J
+		exec git update-ref refs/heads/second HEAD $(git rev-parse J)
+		exec git update-ref refs/heads/first HEAD $(git rev-parse  J)
+		pick $(git log -1 --format=%h K) K
+		pick $(git log -1 --format=%h L) L
+		fixup $(git log -1 --format=%h update-refs) fixup! L
+		exec git update-ref refs/heads/third HEAD $(git rev-parse L)
+		pick $(git log -1 --format=%h M) M
+		exec git update-ref refs/heads/no-conflict-branch HEAD $(git rev-parse M)
+		EOF
+
+		test_cmp expect todo &&
+
+		test_must_fail git -c rebase.autosquash=true \
+				   -c rebase.updaterefs=true \
+				   rebase -i primary >todo &&
+		test_cmp expect todo
+	)
+'
+
 # This must be the last test in this file
 test_expect_success '$EDITOR and friends are unchanged' '
 	test_editor_unchanged

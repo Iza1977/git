@@ -369,6 +369,19 @@ int validate_branchname(const char *name, struct strbuf *ref)
 	return ref_exists(ref->buf);
 }
 
+int branch_checked_out(const char *refname, char **path)
+{
+	struct worktree **worktrees = get_worktrees();
+	const struct worktree *wt = find_shared_symref(worktrees, "HEAD", refname);
+	int result = wt && !wt->is_bare;
+
+	if (result && path)
+		*path = xstrdup(wt->path);
+
+	free_worktrees(worktrees);
+	return result;
+}
+
 /*
  * Check if a branch 'name' can be created as a new branch; die otherwise.
  * 'force' can be used when it is OK for the named branch already exists.
@@ -377,9 +390,7 @@ int validate_branchname(const char *name, struct strbuf *ref)
  */
 int validate_new_branchname(const char *name, struct strbuf *ref, int force)
 {
-	struct worktree **worktrees;
-	const struct worktree *wt;
-
+	char *path;
 	if (!validate_branchname(name, ref))
 		return 0;
 
@@ -387,13 +398,10 @@ int validate_new_branchname(const char *name, struct strbuf *ref, int force)
 		die(_("a branch named '%s' already exists"),
 		    ref->buf + strlen("refs/heads/"));
 
-	worktrees = get_worktrees();
-	wt = find_shared_symref(worktrees, "HEAD", ref->buf);
-	if (wt && !wt->is_bare)
+	if (branch_checked_out(ref->buf, &path))
 		die(_("cannot force update the branch '%s' "
 		      "checked out at '%s'"),
-		    ref->buf + strlen("refs/heads/"), wt->path);
-	free_worktrees(worktrees);
+		    ref->buf + strlen("refs/heads/"), path);
 
 	return 1;
 }

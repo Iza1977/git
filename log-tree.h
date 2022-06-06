@@ -35,4 +35,8 @@ void fmt_output_commit(struct strbuf *, struct commit *, struct rev_info *);
 void fmt_output_subject(struct strbuf *, const char *subject, struct rev_info *);
 void fmt_output_email_subject(struct strbuf *, struct rev_info *);
 
+typedef int decoration_fn(const struct name_decoration *d,
+			  void *data);
+int for_each_decoration(const struct commit *c, decoration_fn fn, void *data);
+
 #endif

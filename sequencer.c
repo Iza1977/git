@@ -35,6 +35,8 @@
 #include "commit-reach.h"
 #include "rebase-interactive.h"
 #include "reset.h"
+#include "branch.h"
+#include "log-tree.h"
 
 #define GIT_REFLOG_ACTION "GIT_REFLOG_ACTION"
 
@@ -5638,10 +5640,104 @@ static int skip_unnecessary_picks(struct repository *r,
 	return 0;
 }
 
+struct todo_add_branch_context {
+	struct todo_list new_list;
+	struct strbuf *buf;
+	struct commit *commit;
+};
+
+static int add_branch_for_decoration(const struct name_decoration *d, void *data)
+{
+	struct todo_add_branch_context *ctx = data;
+	size_t base_offset = ctx->buf->len;
+	int i = ctx->new_list.nr;
+	struct todo_item *item;
+	char *path;
+
+	ALLOC_GROW(ctx->new_list.items,
+		   ctx->new_list.nr + 1,
+		   ctx->new_list.alloc);
+	item = &ctx->new_list.items[i];
+
+	/* If the branch is checked out, then leave a comment instead. */
+	if (branch_checked_out(d->name, &path)) {
+		item->command = TODO_COMMENT;
+		strbuf_addf(ctx->buf, "# Ref %s checked out at '%s'\n",
+			    d->name, path);
+		free(path);
+	} else {
+		item->command = TODO_EXEC;
+		strbuf_addf(ctx->buf, "git update-ref %s HEAD %s\n",
+			    d->name, oid_to_hex(&ctx->commit->object.oid));
+	}
+
+	item->commit = NULL;
+	item->offset_in_buf = base_offset;
+	item->arg_offset = base_offset;
+	item->arg_len = ctx->buf->len - base_offset;
+	ctx->new_list.nr++;
+
+	return 0;
+}
+
+/*
+ * For each 'pick' command, find out if the commit has a decoration in
+ * refs/heads/. If so, then add a 'git branch -f' exec command after
+ * that 'pick' (plus any following 'squash' or 'fixup' commands).
+ */
+static int todo_list_add_branch_commands(struct todo_list *todo_list)
+{
+	int i;
+	static struct string_list decorate_refs_exclude = STRING_LIST_INIT_NODUP;
+	static struct string_list decorate_refs_exclude_config = STRING_LIST_INIT_NODUP;
+	static struct string_list decorate_refs_include = STRING_LIST_INIT_NODUP;
+	struct decoration_filter decoration_filter = {
+		.include_ref_pattern = &decorate_refs_include,
+		.exclude_ref_pattern = &decorate_refs_exclude,
+		.exclude_ref_config_pattern = &decorate_refs_exclude_config
+	};
+	struct todo_add_branch_context ctx = {
+		.new_list = TODO_LIST_INIT,
+		.buf = &todo_list->buf,
+	};
+
+	string_list_append(&decorate_refs_include, "refs/heads/");
+	load_ref_decorations(&decoration_filter, 0);
+
+	for (i = 0; i < todo_list->nr; ) {
+		struct todo_item *item = &todo_list->items[i];
+
+		do {
+			/* insert ith item into new list */
+			ALLOC_GROW(ctx.new_list.items,
+				   ctx.new_list.nr + 1,
+				   ctx.new_list.alloc);
+
+			memcpy(&ctx.new_list.items[ctx.new_list.nr++],
+			       &todo_list->items[i],
+			       sizeof(struct todo_item));
+
+			i++;
+		} while (i < todo_list->nr &&
+			 todo_list->items[i].command != TODO_PICK);
+
+		ctx.commit = item->commit;
+		for_each_decoration(item->commit, add_branch_for_decoration, &ctx);
+	}
+
+	free(todo_list->items);
+	todo_list->items = ctx.new_list.items;
+	todo_list->nr = ctx.new_list.nr;
+	todo_list->alloc = ctx.new_list.alloc;
+
+	return 0;
+}
+
 int complete_action(struct repository *r, struct replay_opts *opts, unsigned flags,
 		    const char *shortrevisions, const char *onto_name,
 		    struct commit *onto, const struct object_id *orig_head,
 		    struct string_list *commands, unsigned autosquash,
+		    unsigned keep_decorations,
 		    struct todo_list *todo_list)
 {
 	char shortonto[GIT_MAX_HEXSZ + 1];
@@ -5661,6 +5757,9 @@ int complete_action(struct repository *r, struct replay_opts *opts, unsigned fla
 	}
 
 	if (autosquash && todo_list_rearrange_squash(todo_list))
+		return -1;
+
+	if (keep_decorations && todo_list_add_branch_commands(todo_list))
 		return -1;
 
 	if (commands->nr)
