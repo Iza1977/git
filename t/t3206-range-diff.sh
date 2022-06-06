@@ -772,4 +772,48 @@ test_expect_success '--left-only/--right-only' '
 	test_cmp expect actual
 '
 
+test_expect_success 'submodule changes are shown irrespective of diff.submodule' '
+	git init sub-repo &&
+	test_commit -C sub-repo sub-first &&
+	sub_oid1=$(git -C sub-repo rev-parse HEAD) &&
+	test_commit -C sub-repo sub-second &&
+	sub_oid2=$(git -C sub-repo rev-parse HEAD) &&
+	test_commit -C sub-repo sub-third &&
+	sub_oid3=$(git -C sub-repo rev-parse HEAD) &&
+
+	git checkout -b main-sub topic &&
+	git submodule add ./sub-repo sub &&
+	git -C sub checkout --detach sub-first &&
+	git add sub &&
+	git commit -m "add sub" &&
+	sup_oid1=$(git rev-parse --short HEAD) &&
+	git checkout -b topic-sub &&
+	git -C sub checkout sub-second &&
+	git add sub &&
+	git commit -m "change sub" &&
+	sup_oid2=$(git rev-parse --short HEAD) &&
+	git checkout -b modified-sub main-sub &&
+	git -C sub checkout sub-third &&
+	git add sub &&
+	git commit -m "change sub" &&
+	sup_oid3=$(git rev-parse --short HEAD) &&
+
+	test_config diff.submodule log &&
+	git range-diff --creation-factor=100 topic topic-sub modified-sub >actual &&
+	cat >expect <<-EOF &&
+	1:  $sup_oid1 = 1:  $sup_oid1 add sub
+	2:  $sup_oid2 ! 2:  $sup_oid3 change sub
+	    @@ Commit message
+	      ## sub ##
+	     @@
+	     -Subproject commit $sub_oid1
+	    -+Subproject commit $sub_oid2
+	    ++Subproject commit $sub_oid3
+	EOF
+	test_cmp expect actual &&
+	test_config diff.submodule diff &&
+	git range-diff --creation-factor=100 topic topic-sub modified-sub >actual &&
+	test_cmp expect actual
+'
+
 test_done
